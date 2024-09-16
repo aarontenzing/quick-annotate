@@ -86,6 +86,8 @@ class quick_annotate:
         
         self.path = "data/*.jpg"
         self.images = glob.glob(self.path) # get all images in the path
+        self.images = sorted(self.images, key=lambda x: int(x.split('\\')[-1].split('.')[0]))
+        print("Total images: ", self.images)
         self.image = cv2.imread(self.images[0])
         
         self.screen_size = screen_size
@@ -147,14 +149,26 @@ class quick_annotate:
     def mouse_callback(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
             self.vertices.append([x, y])
-            cv2.circle(self.image, (x, y), 5, (0, 0, 255), -1)
+            cv2.circle(self.image, (x, y), 4, (0, 0, 255), -1)
 
-    def draw_cuboid(self, points):
-        # Draw the points on the image
+    def draw_cuboid(self, points, edges=False):
+        if edges is True:
+            edges = [
+                (0, 1), (1, 5), (5, 4), (4, 0),  # Bottom face
+                (2, 3), (3, 7), (7, 6), (6, 2),  # Top face
+                (0, 2), (1, 3), (5, 7), (4, 6)   # Vertical edges
+            ]    
+            for edge in edges:
+                point1 = points[edge[0]]
+                point2 = points[edge[1]]
+                x1, y1 = int(point1[0]), int(point1[1])
+                x2, y2 = int(point2[0]), int(point2[1])
+                cv2.line(self.image, (x1, y1), (x2, y2), (255, 0, 0), 3)  # Draw a line for each edge (rib)
+                
         for coordinate in points:
             x, y = int(coordinate[0]), int(coordinate[1])
-            # print(x, y)
             cv2.circle(self.image, (x, y), 15, (0, 255, 0), -1)  # Draw a filled circle at each point     
+        
         return self.image
 
     def calculate_best_cuboid(self, boxSize, vertices, cameraMatrix, distMatrix):
@@ -218,13 +232,14 @@ class quick_annotate:
         print("Best dimensions: ", best_dimensions, "Error distance: ", error_distance)
                         
         return best_PNP_image_points, best_object_points, best_rotation_vector, best_translation_vector, best_dimensions, status 
-            
+
     def run(self):
         
         # Create a window and bind the mouse callback function
         cv2.namedWindow('QUICK ANNOTATE')
         cv2.setMouseCallback('QUICK ANNOTATE', self.mouse_callback)
-        step = 1
+        self.reset_image(self.images[self.idx])
+        step = 0.5
         
         while True:
             # Display the image
@@ -271,22 +286,23 @@ class quick_annotate:
                     self.reset_image(self.images[self.idx]) # reset the image
    
             elif key == ord('f'):
-                cv2.destroyAllWindows()
-                print("finetune")
+                cv2.destroyWindow('QUICK ANNOTATE')
+                print("Finetuning the annotation")
                 while True:
                     
                     # reset the image
                     self.image = cv2.imread(self.images[self.idx])
                      
-                    image_points, _ = cv2.projectPoints(self.cuboid.get_world_coordinates(), self.cuboid.get_rotation_vector(), self.cuboid.get_translation_vector(), self.cameraMatrix, self.distMatrix)
-                    image_points = image_points.reshape(-1, 2) 
-                     
-                    self.draw_cuboid(image_points)
+                    # Project the 3D points to the 2D image plane
+                    if self.cuboid.rotation_vector is not None:
+                        image_points, _ = cv2.projectPoints(self.cuboid.get_world_coordinates(), self.cuboid.get_rotation_vector(), self.cuboid.get_translation_vector(), self.cameraMatrix, self.distMatrix)
+                        image_points = image_points.reshape(-1, 2) 
+                        self.draw_cuboid(image_points, edges=True)
                     
                     w, h = self.calculateWindow(self.image)
                     self.image = cv2.resize(self.image, (w, h))
                     
-                    cv2.imshow('finetune', self.image)
+                    cv2.imshow('FINETUNE', self.image)
                     
                     # Rotation keys (W, S, A, D, Q, E)
                     if key == ord('x'):  # Rotate up (around X-axis)
@@ -327,6 +343,9 @@ class quick_annotate:
                         self.cuboid.translation_vector[2] += step
                         print("X: Move Backward")
                         
+                    elif key == ord('p'):  # Print current cuboid di;ensions whd
+                        print("Current dimensions: ", self.cuboid.get_size())
+                        
                     elif key == 43:  # Plus key (increase step size)
                         step += 0.1
                         print("Plus: Increase step size")
@@ -341,39 +360,47 @@ class quick_annotate:
                     elif key == 13:  # Enter key (save the annotation)
                         # Save the annotation
                         print("Saved the annotation")
+                        center = np.mean(image_points, axis=0) # center of the cuboid
+                        image_points = np.vstack((image_points, center))
                         image_points_int = [[int(round(point[0])), int(round(point[1]))] for point in image_points]
+                        
                         self.data = {
                                     "img_name" : self.images[self.idx].split("\\")[-1], 
+                                    "dimensions": self.cuboid.get_size(),
                                      "projection": image_points_int, 
-                                     "world": object_points.tolist(),
-                                     "dimensions": self.cuboid.get_size()
+                                     "world": object_points.tolist()
                                      }   
                         write_json("annotations.json", self.data)
                         
                         # Reset the cuboid to annotate a new object
-                        del self.cuboid
                         self.cuboid = cuboid(self.boxSize[0], self.boxSize[1], self.boxSize[2])
                         
                         # Move to the next image
                         self.idx += 1
                         if self.idx >= len(self.images):
                             self.idx = 0
-                        self.reset_image(self.images[self.idx]) 
                         
                         # Close the window
-                        cv2.destroyWindow('finetune')
+                        if cv2.getWindowProperty('FINETUNE', cv2.WND_PROP_VISIBLE) >= 1:
+                            cv2.destroyWindow('FINETUNE')
+
+                        # Re-run the main loop
                         self.run()   
                            
+                    # Escape key to quit the program
                     elif key == 27:
-                        cv2.destroyWindow('finetune')
+                        self.cuboid = cuboid(self.boxSize[0], self.boxSize[1], self.boxSize[2])
+                        cv2.destroyWindow('FINETUNE')
+                        self.run()
                         break
                     
                     key = cv2.waitKey(5) & 0xFF  # Adjust the delay (5 ms) as needed
         
             elif key == 27: # escape to quit the program
-                    break
+                cv2.destroyAllWindows()    
+                exit(0)    
                 
-        cv2.destroyAllWindows()                    
+                   
         
 if __name__ == "__main__":
     
