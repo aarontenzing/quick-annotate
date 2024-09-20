@@ -239,7 +239,7 @@ class quick_annotate:
         cv2.namedWindow('QUICK ANNOTATE')
         cv2.setMouseCallback('QUICK ANNOTATE', self.mouse_callback)
         self.reset_image(self.images[self.idx])
-        step = 0.5
+        step = 0.1
         
         while True:
             # Display the image
@@ -286,6 +286,9 @@ class quick_annotate:
                     self.reset_image(self.images[self.idx]) # reset the image
    
             elif key == ord('f'):
+                if len(self.vertices) == 0:
+                    print("Please annotate the object first")
+                    continue
                 cv2.destroyWindow('QUICK ANNOTATE')
                 print("Finetuning the annotation")
                 while True:
@@ -345,6 +348,7 @@ class quick_annotate:
                         
                     elif key == ord('p'):  # Print current cuboid di;ensions whd
                         print("Current dimensions: ", self.cuboid.get_size())
+                        print("Current image", self.images[self.idx])
                         
                     elif key == 43:  # Plus key (increase step size)
                         step += 0.1
@@ -379,6 +383,7 @@ class quick_annotate:
                         self.idx += 1
                         if self.idx >= len(self.images):
                             self.idx = 0
+                        print("Current image: ", self.images[self.idx])
                         
                         # Close the window
                         if cv2.getWindowProperty('FINETUNE', cv2.WND_PROP_VISIBLE) >= 1:
@@ -411,5 +416,5 @@ if __name__ == "__main__":
     # click 'r' to reset the image
     # click 'escape' to quit the program
     
-    qa = quick_annotate(boxSize=[25.5, 27, 38])
+    qa = quick_annotate(boxSize=[25, 10, 15])
     qa.run()
